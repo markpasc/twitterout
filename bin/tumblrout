@@ -167,7 +167,7 @@ class Tumblrout(Termtool):
 
                 if post.get('type') == 'photo':
                     photo_urls = sorted(post.findall('photo-url'), key=lambda el: int(el.get('max-width')))
-                    photo_url = photo_urls[0].text
+                    photo_url = photo_urls[-1].text
                     logging.info('Fetching photo for post #%s', post_id)
                     resp, cont = client.request(photo_url)
                     assert resp.status == 200
