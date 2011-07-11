@@ -3,8 +3,11 @@
 from functools import wraps
 import json
 import logging
-from urlparse import parse_qsl
+from os.path import join
+from urllib import urlencode
+from urlparse import parse_qsl, urlunsplit
 import webbrowser
+from xml.etree import ElementTree
 
 import httplib2
 import oauth2 as oauth
@@ -25,7 +28,6 @@ def authd(fn):
     return moo
 
 
-@argument('--site', help='Tumblr site to export')
 @argument('--api-key', help='Tumblr application API key (in `token:secret` format)')
 @argument('--access-token', help='Tumblr access token (in `token:secret` format)')
 class Tumblrout(Termtool):
@@ -112,7 +114,7 @@ class Tumblrout(Termtool):
 
         print "Configured!"
 
-    @subcommand(help='herp derp')
+    @subcommand(help='verify that the saved authentication keys are good')
     @authd
     def verify(self, args, client):
         resp, cont = client.request('http://www.tumblr.com/api/authenticate', method='POST', body='', headers={'Content-Type': 'application/x-www-form-urlencoded'})
@@ -133,6 +135,47 @@ class Tumblrout(Termtool):
             return
 
         logging.info("Verified!")
+
+    @argument('site', help='domain of the site to export')
+    @argument('dir', help='directory to write files to')
+    @subcommand(help='export a Tumblr tumblelog')
+    @authd
+    def export(self, args, client):
+        read_options = {
+            'start': 0,
+            'num': 50,
+        }
+
+        total = 0
+        while read_options['start'] <= total:
+            api_url = urlunsplit(('http', args.site, '/api/read', None, None))
+            logging.info("Fetching new page of %d posts starting at %d", read_options['num'], read_options['start'])
+            resp, cont = client.request(api_url, method='POST', body=urlencode(read_options), headers={'Content-Type': 'application/x-www-form-urlencoded'})
+            if resp.status != 200:
+                raise ValueError("Unexpected HTTP response %d %s requesting posts" % (resp.status, resp.reason))
+
+            doc = ElementTree.fromstring(cont)
+
+            posts = doc.find('posts')
+            total = int(posts.get('total'))
+
+            for post in posts.findall('post'):
+                post_id = post.get('id')
+                logging.info('Saving out post #%s', post_id)
+                with open(join(args.dir, post_id + '.xml'), 'w') as f:
+                    f.write(ElementTree.tostring(post, 'utf-8'))
+
+                if post.get('type') == 'photo':
+                    photo_urls = sorted(post.findall('photo-url'), key=lambda el: int(el.get('max-width')))
+                    photo_url = photo_urls[0].text
+                    logging.info('Fetching photo for post #%s', post_id)
+                    resp, cont = client.request(photo_url)
+                    assert resp.status == 200
+                    ext = photo_url.split('.')[-1]
+                    with open(join(args.dir, '%s.%s' % (post_id, ext)), 'wb') as f:
+                        f.write(cont)
+
+            read_options['start'] += read_options['num']
 
 
 if __name__ == '__main__':
