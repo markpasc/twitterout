@@ -6,8 +6,6 @@ import logging
 from os.path import join
 from urllib import urlencode
 from urlparse import parse_qsl, urlunsplit
-import webbrowser
-from xml.etree import ElementTree
 
 import httplib2
 import oauth2 as oauth
@@ -18,7 +16,7 @@ def authd(fn):
     @wraps(fn)
     def moo(self, args):
         if not all((args.api_key, args.access_token)):
-            logging.error("Not configured to use Tumblr API yet; try 'configure' command first")
+            logging.error("Not configured to use Twitter API yet; try 'configure' command first")
             sys.exit(1)
 
         csr = oauth.Consumer(*args.api_key.split(':', 1))
@@ -28,84 +26,23 @@ def authd(fn):
     return moo
 
 
-@argument('--api-key', help='Tumblr application API key (in `token:secret` format)')
-@argument('--access-token', help='Tumblr access token (in `token:secret` format)')
-class Tumblrout(Termtool):
+@argument('--api-key', help='Twitter application API key (in `token:secret` format)')
+@argument('--access-token', help='Twitter access token (in `token:secret` format)')
+class Twitterout(Termtool):
 
-    description = 'Export a Tumblr tumblelog.'
+    description = 'Export a Twitter.'
 
     @subcommand(help='configures the API keys')
     def configure(self, args):
         if not args.api_key:
-            token = raw_input('OAuth Consumer Key: ')
-            secret = raw_input('Secret Key: ')
+            token = raw_input('Consumer key: ')
+            secret = raw_input('Consumer secret: ')
             args.api_key = ':'.join((token, secret))
 
         if not args.access_token:
-            csr = oauth.Consumer(*args.api_key.split(':', 1))
-            client = oauth.Client(csr)
-            oauth_callback = 'http://markpasc.org/'
-
-            http_url = 'http://www.tumblr.com/oauth/request_token'
-            oauth_request = oauth.Request.from_consumer_and_token(csr, None,
-                http_method='POST', http_url=http_url)
-            oauth_request['oauth_callback'] = oauth_callback
-            oauth_sign_method = oauth.SignatureMethod_HMAC_SHA1()
-            oauth_request.sign_request(oauth_sign_method, csr, None)
-            oauth_signing_base = oauth_sign_method.signing_base(oauth_request, csr, None)
-            body = oauth_request.to_postdata()
-
-            h = httplib2.Http()
-            h.follow_redirects = 0
-            normal_url = oauth_request.normalized_url
-            logging.debug('Making request to URL %r', normal_url)
-            resp, content = h.request(normal_url, method=oauth_request.method, body=body,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'})
-
-            if resp.status != 200:
-                raise ValueError('Unexpected response asking for Tumblr request token: %d %s: %s' % (resp.status, resp.reason, content))
-            if 'content-type' not in resp:
-                raise ValueError("Response asking for Tumblr request token unexpectedly had no content type (is Tumblr down?)")
-
-            request_token_data = dict(parse_qsl(content))
-            request_token = oauth.Token(request_token_data['oauth_token'], request_token_data['oauth_token_secret'])
-
-            webbrowser.open('http://www.tumblr.com/oauth/authorize?oauth_token=%s&oauth_access_type=write' % (request_token.key,))
-            print
-            verifier = raw_input("OAuth Verifier: ")
-
-            http_url = 'http://www.tumblr.com/oauth/access_token'
-            oauth_request = oauth.Request.from_consumer_and_token(csr, request_token,
-                http_method='POST', http_url=http_url)
-            oauth_request['oauth_verifier'] = verifier
-            oauth_sign_method = oauth.SignatureMethod_HMAC_SHA1()
-            oauth_request.sign_request(oauth_sign_method, csr, request_token)
-            oauth_signing_base = oauth_sign_method.signing_base(oauth_request, csr, request_token)
-            body = oauth_request.to_postdata()
-
-            h = httplib2.Http()
-            h.follow_redirects = 0
-            normal_url = oauth_request.normalized_url
-            logging.debug('Making request to URL %r', normal_url)
-            resp, content = h.request(normal_url, method=oauth_request.method, body=body,
-                headers={'Content-Type': 'application/x-www-form-urlencoded'})
-            if resp.status != 200:
-                raise ValueError("Unexpected response exchanging for Tumblr access token: %d %s" % (resp.status, resp.reason))
-
-            access_token_data = dict(parse_qsl(content))
-            access_token = oauth.Token(access_token_data['oauth_token'], access_token_data['oauth_token_secret'])
-
-            oauth_request = oauth.Request.from_consumer_and_token(csr, access_token,
-                http_method='POST', http_url='http://www.tumblr.com/api/authenticate')
-            oauth_request.sign_request(oauth_sign_method, csr, access_token)
-
-            resp, cont = h.request(oauth_request.normalized_url, method=oauth_request.method,
-                body=oauth_request.to_postdata(), headers={'Content-Type': 'application/x-www-form-urlencoded'})
-            if resp.status != 200:
-                raise ValueError("Unexpected response checking Tumblr access token: %d %s" % (resp.status, resp.reason))
-
-            args.access_token = ':'.join((access_token.key, access_token.secret))
-            logging.debug("ACCESS TOKEN: %r", args.access_token)
+            token = raw_input('Access token: ')
+            secret = raw_input('Access token secret: ')
+            args.access_token = ':'.join((token, secret))
 
         self.write_config_file(
             '--api-key', args.api_key,
@@ -117,21 +54,21 @@ class Tumblrout(Termtool):
     @subcommand(help='verify that the saved authentication keys are good')
     @authd
     def verify(self, args, client):
-        resp, cont = client.request('http://www.tumblr.com/api/authenticate', method='POST', body='', headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        resp, cont = client.request('https://api.twitter.com/1.1/account/verify_credentials.json')
         if resp.status == 500:
             logging.warn("Server error verifying authentication")
             return
         if resp.status == 408:
-            logging.warn("Timeout verifying authentication (is Tumblr down/slow?)")
+            logging.warn("Timeout verifying authentication (is Twitter down/slow?)")
             return
         if resp.status != 200:
             raise ValueError("Unexpected HTTP response %d %s verifying authentication" % (resp.status, resp.reason))
         content_type = resp.get('content-type')
         if content_type is None:
-            logging.warn("Response verifying authentication had no content type (is Tumblr down?)")
+            logging.warn("Response verifying authentication had no content type (is Twitter down?)")
             return
-        if not content_type.startswith('text/xml'):
-            logging.warn("Unexpected response of type %r verifying authentication (expected text/xml)", content_type)
+        if not content_type.startswith('application/json'):
+            logging.warn("Unexpected response of type %r verifying authentication (expected application/json)", content_type)
             return
 
         logging.info("Verified!")
@@ -179,4 +116,4 @@ class Tumblrout(Termtool):
 
 
 if __name__ == '__main__':
-    Tumblrout().run()
+    Twitterout().run()
