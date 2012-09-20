@@ -1,6 +1,6 @@
-# tumblrout #
+# twitterout #
 
-`tumblrout` is a command line tool for exporting a Tumblr blog to local files.
+`twitterout` is a command line tool for exporting a Twitter to local files.
 
 
 ## Installation ##
@@ -18,21 +18,22 @@ If you don't want to install its dependencies system-wide, try installing it in 
 
 ## Configuring ##
 
-First, you'll need a Tumblr API key. Register an application on [the Applications page of tumblr.com](http://www.tumblr.com/oauth/apps) to get a key. Once you have a key, run the `configure` command:
+First, you'll need a Twitter API access token. Register an application on [the Applications page of dev.twitter.com](https://dev.twitter.com/apps), then click the "Create my access token" button to get an access token. Once you have it, run the `configure` command:
 
-    $ tumblrout configure
-    OAuth Consumer Key: 68-A
-    Secret Key: f73D85A83def7BC29580FEB9f087A69Bc6bfacd1DDDBEBfb2bAF52c1
-
-    OAuth Verifier: 13b24c7D485A9C4e99F1B4b163ddAE6eE4b9917e
+    $ twitterout configure
+    Consumer key: 3sJE5btgFco5kh4HGR1b
+    Consumer secret: TfuunBJjZNo3phB47p7an0n53M40e6eGq18821u
+    Access token: xta5ADPa4KtRnNdN8rylSsCHRu6C7xdSJMYawUSrH3rEKjT
+    Access token secret: GYf3dlAGVZmqkdlGF7VWk0AgwJR1UOtJwKRuG3mO2
+    
     Configured!
 
-After entering your secret key, the authorization page should open in your web browser. After approving your app, copy the `oauth_verifier` from the URL of the resulting page and paste it at the `OAuth Verifier:` prompt.
+Boom, solutionized.
 
 
 ## Usage ##
 
-See `tumblrout --help` for supported commands.
+See `twitterout --help` for supported commands.
 
     $ tumblrout -v verify
     INFO: Set log level to INFO
