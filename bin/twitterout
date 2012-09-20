@@ -1,15 +1,25 @@
 #!/usr/bin/env python
 
 from functools import wraps
+import codecs
 import json
 import logging
-from os.path import join
-from urllib import urlencode
+import os
+from os.path import join, isdir
+import time
+from urllib import urlencode, urlretrieve
 from urlparse import parse_qsl, urlunsplit
 
 import httplib2
 import oauth2 as oauth
 from termtool import Termtool, subcommand, argument
+
+
+def join_mkdir(*args):
+    dirpath = join(*args)
+    if not isdir(dirpath):
+        os.makedirs(dirpath)
+    return dirpath
 
 
 def authd(fn):
@@ -73,46 +83,69 @@ class Twitterout(Termtool):
 
         logging.info("Verified!")
 
-    @argument('site', help='domain of the site to export')
+    def raise_for_response(self, resp, url, cont, expect=200):
+        if resp.status != expect:
+            logging.debug("ERROR RESPONSE: " + cont)
+            raise ValueError("Unexpected HTTP response %d %s making request %s" % (resp.status, resp.reason, url))
+        content_type = resp.get('content-type')
+        if not content_type or not content_type.startswith('application/json'):
+            raise ValueError("Unexpected content type '%s' for request %s" % (content_type, url))
+
+    def save_tweet(self, dirname, tweet):
+        # Write out the JSON.
+        tweet_id = tweet['id_str']
+        filepath = join(dirname, tweet_id + '.json')
+        with codecs.open(filepath, 'w', 'utf8') as f:
+            json.dump(tweet, f)
+
+        # Save the tweet's media.
+        for picture in tweet.get('entities', {}).get('media', ()):
+            pic_id = picture['id_str']
+            _, ext = picture['media_url'].rsplit('.', 1)
+            url = picture['media_url'] + ':large'
+            filename = '.'.join((pic_id, ext))
+            filepath = join(dirname, filename)
+            urlretrieve(url, filepath)
+
     @argument('dir', help='directory to write files to')
-    @subcommand(help='export a Tumblr tumblelog')
+    @subcommand(help="export a Twitter's tweets")
     @authd
-    def export(self, args, client):
-        read_options = {
-            'start': 0,
-            'num': 50,
-        }
+    def tweets(self, args, client):
+        tweet_dir = join_mkdir(args.dir, 'tweets')
+        latest_id = None
 
-        total = 0
-        while read_options['start'] <= total:
-            api_url = urlunsplit(('http', args.site, '/api/read', None, None))
-            logging.info("Fetching new page of %d posts starting at %d", read_options['num'], read_options['start'])
-            resp, cont = client.request(api_url, method='POST', body=urlencode(read_options), headers={'Content-Type': 'application/x-www-form-urlencoded'})
-            if resp.status != 200:
-                raise ValueError("Unexpected HTTP response %d %s requesting posts" % (resp.status, resp.reason))
+        while True:
+            api_args = {
+                'count': 200,
+                'include_rts': 'true',
+                'trim_user': 'true',  # only user's user, retweet users still present
+            }
+            if latest_id is not None:
+                api_args['max_id'] = latest_id - 1
+            api_url = urlunsplit(('https', 'api.twitter.com', '/1.1/statuses/user_timeline.json', urlencode(api_args), None))
+            resp, cont = client.request(api_url)
 
-            doc = ElementTree.fromstring(cont)
+            if resp.status != 429:
+                self.raise_for_response(resp, api_url, cont)
 
-            posts = doc.find('posts')
-            total = int(posts.get('total'))
+                tweets = json.loads(cont)
+                if not tweets:
+                    break
+                for tweet in tweets:
+                    self.save_tweet(tweet_dir, tweet)
 
-            for post in posts.findall('post'):
-                post_id = post.get('id')
-                logging.info('Saving out post #%s', post_id)
-                with open(join(args.dir, post_id + '.xml'), 'w') as f:
-                    f.write(ElementTree.tostring(post, 'utf-8'))
+                latest_id = min(t['id'] for t in tweets)
+                logging.debug("Successful request through %r leaves %s requests until %s"
+                    % (latest_id, resp['x-rate-limit-remaining'], resp['x-rate-limit-reset']))
 
-                if post.get('type') == 'photo':
-                    photo_urls = sorted(post.findall('photo-url'), key=lambda el: int(el.get('max-width')))
-                    photo_url = photo_urls[-1].text
-                    logging.info('Fetching photo for post #%s', post_id)
-                    resp, cont = client.request(photo_url)
-                    assert resp.status == 200
-                    ext = photo_url.split('.')[-1]
-                    with open(join(args.dir, '%s.%s' % (post_id, ext)), 'wb') as f:
-                        f.write(cont)
+            if resp.status == 429 or not int(resp['x-rate-limit-remaining']):
+                reset_time = int(resp['x-rate-limit-reset'])
+                # Wait ten extra seconds in case of skew.
+                to_sleep = int(reset_time - time.time()) + 10
+                logging.warn("Rate limited; trying again in %d seconds", to_sleep)
+                time.sleep(to_sleep)
 
-            read_options['start'] += read_options['num']
+        logging.info("Saved all tweets!")
 
 
 if __name__ == '__main__':
