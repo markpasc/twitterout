@@ -96,6 +96,7 @@ class Twitterout(Termtool):
         tweet_id = tweet['id_str']
         filepath = join(dirname, tweet_id + '.json')
         with codecs.open(filepath, 'w', 'utf8') as f:
+            # TODO: Use human-formatted json.
             json.dump(tweet, f)
 
         # Save the tweet's media.
@@ -107,23 +108,21 @@ class Twitterout(Termtool):
             filepath = join(dirname, filename)
             urlretrieve(url, filepath)
 
-    @argument('dir', help='directory to write files to')
-    @subcommand(help="export a Twitter's tweets")
-    @authd
-    def tweets(self, args, client):
-        tweet_dir = join_mkdir(args.dir, 'tweets')
+    def fetch_tweets(self, args, client, dirname, api_path, api_args):
+        tweet_dir = join_mkdir(args.dir, dirname)
         latest_id = None
 
         while True:
-            api_args = {
-                'count': 200,
-                'include_rts': 'true',
-                'trim_user': 'true',  # only user's user, retweet users still present
-            }
+            query_args = dict(api_args)
             if latest_id is not None:
-                api_args['max_id'] = latest_id - 1
-            api_url = urlunsplit(('https', 'api.twitter.com', '/1.1/statuses/user_timeline.json', urlencode(api_args), None))
+                query_args['max_id'] = latest_id - 1
+            api_url = urlunsplit(('https', 'api.twitter.com', api_path, urlencode(query_args), None))
             resp, cont = client.request(api_url)
+
+            if resp.status == 502:
+                logging.warn("Over capacity; trying again in 10 seconds")
+                time.sleep(10)
+                continue
 
             if resp.status != 429:
                 self.raise_for_response(resp, api_url, cont)
@@ -146,6 +145,35 @@ class Twitterout(Termtool):
                 time.sleep(to_sleep)
 
         logging.info("Saved all tweets!")
+
+    @argument('dir', help='directory to write files to')
+    @subcommand(help="export a Twitter's tweets")
+    @authd
+    def tweets(self, args, client):
+        api_args = {
+            'count': 200,
+            'include_rts': 'true',
+            'trim_user': 'true',  # only user's user, retweet users still present
+        }
+        self.fetch_tweets(args, client, 'tweets', '/1.1/statuses/user_timeline.json', api_args)
+
+    @argument('dir', help='directory to write files to')
+    @subcommand(help="export a Twitter's favorites")
+    @authd
+    def favorites(self, args, client):
+        api_args = {
+            'count': 200,
+        }
+        self.fetch_tweets(args, client, 'favorites', '/1.1/favorites/list.json', api_args)
+
+    @argument('dir', help='directory to write files to')
+    @subcommand(help="export a Twitter's mentions")
+    @authd
+    def mentions(self, args, client):
+        api_args = {
+            'count': 200,
+        }
+        self.fetch_tweets(args, client, 'mentions', '/1.1/statuses/mentions_timeline.json', api_args)
 
 
 if __name__ == '__main__':
