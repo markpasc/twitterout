@@ -5,11 +5,7 @@
 
 ## Installation ##
 
-Install its dependencies from the `requirements.txt` file:
-
-    $ pip install -r requirements.txt
-
-Then you can install it as any other Python program:
+Install `twitterout` as any other Python program:
 
     $ python setup.py install
 
@@ -38,7 +34,7 @@ See `twitterout --help` for supported commands.
     $ tumblrout -v verify
     INFO: Set log level to INFO
     INFO: Verified!
-    
+
     $ bin/twitterout -v -v -v favorites out
     INFO: Set log level to DEBUG
     DEBUG: Successful request through 237609354176643073 leaves 13 requests until 1348187624
@@ -72,5 +68,5 @@ See `twitterout --help` for supported commands.
     DEBUG: Successful request through 791491038 leaves 14 requests until 1348188532
     DEBUG: Successful request through 376054532 leaves 13 requests until 1348188532
     INFO: Saved all tweets!
-    
+
     $
