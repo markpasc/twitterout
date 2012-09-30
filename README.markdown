@@ -31,11 +31,11 @@ Boom, solutionized.
 
 See `twitterout --help` for supported commands.
 
-    $ tumblrout -v verify
+    $ twitterout -v verify
     INFO: Set log level to INFO
     INFO: Verified!
 
-    $ bin/twitterout -v -v -v favorites out
+    $ twitterout -v -v -v favorites out/
     INFO: Set log level to DEBUG
     DEBUG: Successful request through 237609354176643073 leaves 13 requests until 1348187624
     DEBUG: Successful request through 226428073241874432 leaves 12 requests until 1348187624
