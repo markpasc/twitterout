@@ -96,7 +96,6 @@ class Twitterout(Termtool):
         tweet_id = tweet['id_str']
         filepath = join(dirname, tweet_id + '.json')
         with codecs.open(filepath, 'w', 'utf8') as f:
-            # TODO: Use human-formatted json.
             json.dump(tweet, f, indent=4, sort_keys=True)
 
         # Save the tweet's media.
