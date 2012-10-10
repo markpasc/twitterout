@@ -107,41 +107,98 @@ class Twitterout(Termtool):
             filepath = join(dirname, filename)
             urlretrieve(url, filepath)
 
-    def fetch_tweets(self, args, client, dirname, api_path, api_args):
-        tweet_dir = join_mkdir(args.dir, dirname)
-        latest_id = None
-
+    def request_with_wait(self, client, *args, **kwargs):
         while True:
-            query_args = dict(api_args)
-            if latest_id is not None:
-                query_args['max_id'] = latest_id - 1
-            api_url = urlunsplit(('https', 'api.twitter.com', api_path, urlencode(query_args), None))
-            resp, cont = client.request(api_url)
+            resp, cont = client.request(*args, **kwargs)
 
             if resp.status == 502:
                 logging.warn("Over capacity; trying again in 10 seconds")
                 time.sleep(10)
                 continue
 
-            if resp.status != 429:
-                self.raise_for_response(resp, api_url, cont)
-
-                tweets = json.loads(cont)
-                if not tweets:
-                    break
-                for tweet in tweets:
-                    self.save_tweet(tweet_dir, tweet)
-
-                latest_id = min(t['id'] for t in tweets)
-                logging.debug("Successful request through %r leaves %s requests until %s"
-                    % (latest_id, resp['x-rate-limit-remaining'], resp['x-rate-limit-reset']))
-
+            # If we were throttled, wait until we get more requests. Wait if
+            # we're just out of requests, too -- we don't have to but it'd be
+            # hard to make the next request wait.
             if resp.status == 429 or not int(resp['x-rate-limit-remaining']):
                 reset_time = int(resp['x-rate-limit-reset'])
                 # Wait ten extra seconds in case of skew.
                 to_sleep = int(reset_time - time.time()) + 10
-                logging.warn("Rate limited; trying again in %d seconds", to_sleep)
+
+                log_msg = ("Rate limited; trying again in %d seconds" if resp.status == 429
+                    else "Out of requests; continuing in %d seconds")
+                logging.warn(log_msg, to_sleep)
+
                 time.sleep(to_sleep)
+
+            # If we weren't throttled (even if we waited to avoid a throttle),
+            # we can return this result now.
+            if resp.status != 429:
+                break
+
+        return resp, cont
+
+    def add_retweeted_users(self, client, retweets_for_retweeted_user_id):
+        # Make a shallow copy so we can delete elements without spooky action.
+        retweets_for_retweeted_user_id = dict(retweets_for_retweeted_user_id)
+
+        while retweets_for_retweeted_user_id:
+            # Twitter recommends using POST for this request, since a request
+            # with up to 100 user IDs might be big. But you also can't POST
+            # with a read-only app. So sip a few user IDs with GETs instead.
+            keys = retweets_for_retweeted_user_id.keys()[:15]
+            body = urlencode({'user_id': ','.join(keys)})
+            api_url = 'https://api.twitter.com/1.1/users/lookup.json?' + body
+            resp, cont = self.request_with_wait(client, api_url)
+
+            self.raise_for_response(resp, api_url, cont)
+
+            users = json.loads(cont)
+            for user in users:
+                user_id = user['id_str']
+                retweets = retweets_for_retweeted_user_id[user_id]
+                for retweet in retweets:
+                    retweet['retweeted_status']['user'] = user
+
+            # Delete all the keys we asked about. Eventually the dict will be
+            # empty and the loop will end.
+            for key in keys:
+                del retweets_for_retweeted_user_id[key]
+
+    def fetch_tweets(self, args, client, dirname, api_path, api_args):
+        tweet_dir = join_mkdir(args.dir, dirname)
+        latest_id = None
+        retweets_for_retweeted_user_id = dict()
+
+        while True:
+            query_args = dict(api_args)
+            if latest_id is not None:
+                query_args['max_id'] = latest_id - 1
+            api_url = urlunsplit(('https', 'api.twitter.com', api_path, urlencode(query_args), None))
+            resp, cont = self.request_with_wait(client, api_url)
+
+            self.raise_for_response(resp, api_url, cont)
+
+            tweets = json.loads(cont)
+            if not tweets:
+                break
+            for tweet in tweets:
+                # Note a retweet to get full retweeted user info later.
+                if tweet.get('retweeted_status') is not None:
+                    retweet_user_id = tweet['retweeted_status']['user']['id_str']
+                    retweets = retweets_for_retweeted_user_id.setdefault(retweet_user_id, list())
+                    retweets.append(tweet)
+                else:
+                    self.save_tweet(tweet_dir, tweet)
+
+            latest_id = min(t['id'] for t in tweets)
+            logging.debug("Successful request through %r leaves %s requests until %s"
+                % (latest_id, resp['x-rate-limit-remaining'], resp['x-rate-limit-reset']))
+
+        # Fill in retweets' user data and save.
+        self.add_retweeted_users(client, retweets_for_retweeted_user_id)
+        for retweets in retweets_for_retweeted_user_id.itervalues():
+            for retweet in retweets:
+                self.save_tweet(tweet_dir, retweet)
 
         logging.info("Saved all tweets!")
 
